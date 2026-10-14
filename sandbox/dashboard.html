@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeadFlow Sync</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b2a41; --muted: #6b7280; --line: #e5e7eb;
+    --green: #047857; --green-bg: #ecfdf5; --blue: #1d4ed8; --blue-bg: #eff6ff;
+    --amber: #92400e; --amber-bg: #fff7e0; --red: #b91c1c; --red-bg: #fef2f2; --gray-bg: #f3f4f6;
+    --slack: #4a154b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 18px 24px 6px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .faults { margin-left: auto; font-size: 12px; color: var(--red); font-weight: 600; }
+  .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; padding: 10px 24px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  .kpi b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+  .kpi span { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 12px; padding: 6px 24px 24px; }
+  .col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0; }
+  section h2 { margin: 0; font-size: 13px; padding: 10px 14px; border-bottom: 1px solid var(--line);
+               display: flex; justify-content: space-between; align-items: center; }
+  section h2 small { color: var(--muted); font-weight: 400; }
+  .scroll { max-height: 360px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 7px 10px; position: sticky; top: 0; background: var(--panel);
+       border-bottom: 1px solid var(--line); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.wrap { max-width: 260px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .created { background: var(--green-bg); color: var(--green); }
+  .updated { background: var(--blue-bg); color: var(--blue); }
+  .duplicate, .rejected { background: var(--gray-bg); color: var(--muted); }
+  .failed, .notify_failed { background: var(--red-bg); color: var(--red); }
+  .high { color: var(--red); font-weight: 600; } .medium { color: var(--amber); } .low { color: var(--muted); }
+  .msg { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .msg .who { font-weight: 700; color: var(--slack); font-size: 12.5px; }
+  .msg .who time { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .msg pre { margin: 4px 0 0; white-space: pre-wrap; font: inherit; }
+  .alert .who { color: var(--red); }
+  .calls td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; padding: 4px 10px; }
+  .s2 { color: var(--green); } .s4, .s5 { color: var(--red); font-weight: 700; }
+  .empty { color: var(--muted); padding: 14px; font-size: 13px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(3, 1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>LeadFlow Sync</h1>
+  <span class="sub">Demo project · sandbox stand-ins for HubSpot, Slack and the run log · synthetic leads</span>
+  <span class="faults" id="faults"></span>
+</header>
+<div class="kpis" id="kpis"></div>
+<main>
+  <div class="col">
+    <section><h2>Run log <small id="logcount"></small></h2><div class="scroll"><table id="log"></table></div></section>
+    <section><h2>CRM contacts (HubSpot API sandbox) <small id="crmcount"></small></h2><div class="scroll"><table id="crm"></table></div></section>
+  </div>
+  <div class="col">
+    <section><h2>Slack · #leads</h2><div class="scroll" id="slack"></div></section>
+    <section><h2>Slack · #leadflow-alerts</h2><div class="scroll" id="alerts"></div></section>
+    <section><h2>API calls <small>latest first · retries show up here</small></h2><div class="scroll"><table class="calls" id="calls"></table></div></section>
+  </div>
+</main>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const time = t => t ? new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "";
+let last = "";
+
+function render(s) {
+  const count = st => s.log.filter(r => r.status === st).length;
+  const kpis = [["Leads processed", s.log.length], ["Created", count("created")], ["Updated", count("updated")],
+                ["Skipped", count("duplicate") + count("rejected")], ["Failed", count("failed") + count("notify_failed")],
+                ["Alerts sent", s.alerts.length]];
+  document.getElementById("kpis").innerHTML = kpis.map(([k, v]) => `<div class="kpi"><b>${v}</b><span>${k}</span></div>`).join("");
+  const f = Object.entries(s.faults);
+  document.getElementById("faults").textContent = f.length ? "Fault injected: " + f.map(([t, x]) => `${t} ${x.mode}${x.mode === "down" ? "" : " ×" + x.count}`).join(", ") : "";
+
+  document.getElementById("logcount").textContent = `${s.log.length} rows`;
+  document.getElementById("log").innerHTML = s.log.length ? "<tr><th>Time</th><th>Lead</th><th>Status</th><th>Type</th><th>Urgency</th><th>Detail</th></tr>" +
+    s.log.slice().reverse().map(r => `<tr><td>${time(r.timestamp)}</td><td>${esc(r.name || r.email)}<br><span class="sub">${esc(r.company)}</span></td>
+      <td><span class="pill ${esc(r.status)}">${esc(r.status)}</span></td><td>${esc(r.lead_type)}</td>
+      <td class="${esc(r.urgency)}">${esc(r.urgency)}</td>
+      <td class="wrap">${r.error ? `<span class="s5">${esc(r.failed_step)}: ${esc(r.error)}</span>` : esc(r.summary)}</td></tr>`).join("")
+    : `<tr><td class="empty">Waiting for leads…</td></tr>`;
+
+  document.getElementById("crmcount").textContent = `${s.contacts.length} contacts`;
+  document.getElementById("crm").innerHTML = s.contacts.length ? "<tr><th>ID</th><th>Name</th><th>Email</th><th>Company</th><th>Type</th><th>Urgency</th></tr>" +
+    s.contacts.slice().reverse().map(c => { const p = c.properties;
+      return `<tr><td>${esc(c.id)}</td><td>${esc(p.firstname)} ${esc(p.lastname)}</td><td>${esc(p.email)}</td><td>${esc(p.company)}</td>
+      <td>${esc(p.leadflow_type)}</td><td class="${esc(p.leadflow_urgency)}">${esc(p.leadflow_urgency)}</td></tr>`; }).join("")
+    : `<tr><td class="empty">No contacts yet</td></tr>`;
+
+  const feed = (list, cls, who) => list.length ? list.slice().reverse().map(m =>
+    `<div class="msg ${cls}"><div class="who">${who}<time>${time(m.t)}</time></div><pre>${esc(m.text)}</pre></div>`).join("")
+    : `<div class="empty">No messages</div>`;
+  document.getElementById("slack").innerHTML = feed(s.slack, "", "LeadFlow bot");
+  document.getElementById("alerts").innerHTML = feed(s.alerts, "alert", "LeadFlow alerts");
+
+  document.getElementById("calls").innerHTML = s.calls.slice().reverse().map(c =>
+    `<tr><td>${time(c.t)}</td><td>${esc(c.target)}</td><td>${esc(c.method)}</td><td class="s${String(c.status)[0]}">${c.status}</td><td>${esc(c.note)}</td></tr>`).join("");
+}
+
+async function tick() {
+  try {
+    const r = await fetch("/_state", {cache: "no-store"});
+    const text = await r.text();
+    if (text !== last) { last = text; render(JSON.parse(text)); }
+  } catch (e) { /* sandbox restarting */ }
+  setTimeout(tick, 1000);
+}
+tick();
+</script>
+</body>
+</html>

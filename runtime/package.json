@@ -1,0 +1,1 @@
+{"name":"leadflow-runtime","private":true,"description":"Local n8n used by the LeadFlow Sync demo","dependencies":{"n8n":"2.43.5"}}
