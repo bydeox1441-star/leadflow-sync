@@ -154,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # -------------------------------------------------------------- routes
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        if self.path.split("?")[0] in ("/", "/index.html"):  # the dashboard accepts ?mask=1
             return self._send(200, DASHBOARD.read_bytes(), "text/html; charset=utf-8")
         if self.path == "/_state":
             with STATE.lock:

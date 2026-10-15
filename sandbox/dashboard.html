@@ -70,7 +70,10 @@
   </div>
 </main>
 <script>
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// ?mask=1 hides emails and links (for screenshots and videos shown on marketplaces).
+const MASK = new URLSearchParams(location.search).has("mask");
+const mask = s => MASK ? s.replace(/[\w.+-]*@[\w.-]*/g, "[email hidden]").replace(/https?:\/\/\S+/g, "[link]") : s;
+const esc = s => mask(String(s ?? "")).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const time = t => t ? new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "";
 let last = "";
 
